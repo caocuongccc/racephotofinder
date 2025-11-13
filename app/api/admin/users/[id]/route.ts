@@ -6,7 +6,7 @@ import prisma from '@/lib/prisma'
 // PATCH /api/admin/users/[id] - Update user
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -19,7 +19,7 @@ export async function PATCH(
     const { name, role, isActive } = body
 
     const user = await prisma.user.update({
-      where: { id: params.id },
+      where: { id: (await context.params).id },
       data: {
         ...(name && { name }),
         ...(role && { role }),
@@ -45,7 +45,7 @@ export async function PATCH(
 // DELETE /api/admin/users/[id] - Delete user
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -55,7 +55,7 @@ export async function DELETE(
     }
 
     // Don't allow deleting self
-    if (params.id === session.user.id) {
+    if ((await context.params).id === session.user.id) {
       return NextResponse.json(
         { error: 'Cannot delete yourself' },
         { status: 400 }
@@ -63,7 +63,7 @@ export async function DELETE(
     }
 
     await prisma.user.delete({
-      where: { id: params.id },
+      where: { id: (await context.params).id },
     })
 
     return NextResponse.json({ success: true })

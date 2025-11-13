@@ -5,7 +5,7 @@ import { getThumbnailUrl, getDirectDownloadUrl } from '@/lib/google-drive'
 // POST /api/events/[id]/search-by-face - Search photos by face similarity
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const body = await request.json()
@@ -33,7 +33,7 @@ export async function POST(
         bounding_box
       FROM face_embeddings fe
       JOIN photos p ON p.id = fe.photo_id
-      WHERE p.event_id = ${params.id}::uuid
+      WHERE p.event_id = ${(await context.params).id}::uuid
         AND p.is_processed = true
       ORDER BY embedding <=> ${embeddingStr}::vector
       LIMIT ${limit}

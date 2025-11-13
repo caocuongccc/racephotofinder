@@ -8,11 +8,11 @@ import { extractBibNumbers } from '@/lib/ocr'
 // POST /api/photos/[id]/ocr - Extract BIB numbers using OCR
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
-
+    const params = await context.params
     if (!session || (session.user.role !== 'admin' && session.user.role !== 'uploader')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

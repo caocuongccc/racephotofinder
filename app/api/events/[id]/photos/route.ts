@@ -5,7 +5,7 @@ import { getThumbnailUrl, getDirectDownloadUrl } from '@/lib/google-drive'
 // GET /api/events/[id]/photos - Lấy danh sách photos của event
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url)
@@ -14,7 +14,7 @@ export async function GET(
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
     const skip = (page - 1) * limit
-
+    const params = await context.params
     let where: any = { eventId: params.id, isProcessed: true }
 
     // Search by bib number or runner name

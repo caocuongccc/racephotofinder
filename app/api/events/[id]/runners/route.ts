@@ -6,13 +6,13 @@ import prisma from '@/lib/prisma'
 // GET /api/events/[id]/runners - Lấy danh sách runners của event
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')
 
-    const where: any = { eventId: params.id }
+    const where: any = { eventId: (await context.params).id }
 
     if (search) {
       where.OR = [
@@ -38,11 +38,11 @@ export async function GET(
 // POST /api/events/[id]/runners - Tạo runner mới hoặc bulk import
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
-
+    const params = (await context.params).id
     if (!session || (session.user.role !== 'admin' && session.user.role !== 'uploader')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -59,7 +59,7 @@ export async function POST(
 
     // Verify event exists
     const event = await prisma.event.findUnique({
-      where: { id: params.id },
+      where: { id: params },
     })
 
     if (!event) {
@@ -71,7 +71,7 @@ export async function POST(
       const permission = await prisma.eventPermission.findUnique({
         where: {
           eventId_uploaderId: {
-            eventId: params.id,
+            eventId: (await context.params).id,
             uploaderId: session.user.id,
           },
         },
@@ -85,7 +85,7 @@ export async function POST(
     // Bulk create runners
     const createdRunners = await prisma.runner.createMany({
       data: runners.map((runner: any) => ({
-        eventId: params.id,
+        eventId: params,
         bibNumber: runner.bibNumber,
         fullName: runner.fullName,
         category: runner.category || null,

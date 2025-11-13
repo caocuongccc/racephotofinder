@@ -6,9 +6,10 @@ import prisma from '@/lib/prisma'
 // GET /api/runners/[id] - Lấy thông tin runner
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params
     const runner = await prisma.runner.findUnique({
       where: { id: params.id },
       include: {
@@ -40,11 +41,11 @@ export async function GET(
 // PATCH /api/runners/[id] - Cập nhật runner
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
-
+    const params = await context.params
     if (!session || (session.user.role !== 'admin' && session.user.role !== 'uploader')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -72,11 +73,11 @@ export async function PATCH(
 // DELETE /api/runners/[id] - Xóa runner
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
-
+    const params = await context.params
     if (!session || session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

@@ -8,11 +8,11 @@ import { uploadToGoogleDrive, generateFileKey } from '@/lib/google-drive'
 // POST /api/photos/[id]/confirm - Confirm upload and process photo
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
-
+    const params = await context.params
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

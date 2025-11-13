@@ -6,7 +6,7 @@ import prisma from '@/lib/prisma'
 // DELETE /api/admin/permissions/[id] - Delete permission
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ eventId: string }> } 
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -16,7 +16,7 @@ export async function DELETE(
     }
 
     await prisma.eventPermission.delete({
-      where: { id: params.id },
+      where: { id: (await context.params).eventId },
     })
 
     return NextResponse.json({ success: true })

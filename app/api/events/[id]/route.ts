@@ -6,11 +6,11 @@ import prisma from '@/lib/prisma'
 // GET /api/events/[id] - Lấy thông tin event
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const event = await prisma.event.findUnique({
-      where: { id: params.id },
+      where: { id: (await context.params).id },
       include: {
         _count: {
           select: {
@@ -35,7 +35,7 @@ export async function GET(
 // PATCH /api/events/[id] - Cập nhật event
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -48,7 +48,7 @@ export async function PATCH(
     const { name, eventDate, location, description, isActive } = body
 
     const event = await prisma.event.update({
-      where: { id: params.id },
+      where: { id: (await context.params).id },
       data: {
         ...(name && { name }),
         ...(eventDate && { eventDate: new Date(eventDate) }),
@@ -68,7 +68,7 @@ export async function PATCH(
 // DELETE /api/events/[id] - Xóa event
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -78,7 +78,7 @@ export async function DELETE(
     }
 
     await prisma.event.delete({
-      where: { id: params.id },
+      where: { id: (await context.params).id },
     })
 
     return NextResponse.json({ success: true })
