@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ eventId
 // POST /api/admin/payment-config/[eventId] - Create or update
 export async function POST(
   request: NextRequest,
-  { params }: { params: { eventId: string } }
+  context: { params: Promise<{ eventId: string }> } }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -59,9 +59,9 @@ export async function POST(
 
     // Upsert payment config
     const config = await prisma.paymentConfig.upsert({
-      where: { eventId: params.eventId },
+      where: { eventId: (await context.params).eventId },
       create: {
-        eventId: params.eventId,
+        eventId: (await context.params).eventId,
         pricePerPhoto,
         bankName,
         bankAccountNo,
