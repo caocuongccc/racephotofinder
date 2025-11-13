@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ eventId
  {
   try {
     const config = await prisma.paymentConfig.findUnique({
-      where: { eventId: context.params },
+      where: { eventId: (await context.params).eventId },
     })
 
     return NextResponse.json(config || null)
