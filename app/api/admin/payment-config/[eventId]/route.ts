@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ eventId
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-
+ 
 // POST /api/admin/payment-config/[eventId] - Create or update
 export async function POST(
   request: NextRequest,
