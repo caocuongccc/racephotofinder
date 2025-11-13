@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ eventId
 // POST /api/admin/payment-config/[eventId] - Create or update
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ eventId: string }> } }
+  context: { params: Promise<{ eventId: string }> } 
 ) {
   try {
     const session = await getServerSession(authOptions)
