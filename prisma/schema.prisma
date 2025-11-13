@@ -1,0 +1,241 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum UserRole {
+  admin
+  uploader
+  user
+}
+
+enum PaymentStatus {
+  pending
+  verified
+  completed
+  rejected
+  expired
+}
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  name         String   @db.VarChar(255)
+  role         UserRole @default(user)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdEvents    Event[]           @relation("EventCreator")
+  eventPermissions EventPermission[]
+  uploadedPhotos   Photo[]           @relation("PhotoUploader")
+  photoTags        PhotoTag[]
+  activityLogs     ActivityLog[]
+  verifiedPayments Payment[]         @relation("PaymentVerifier")
+
+  @@map("users")
+}
+
+model Event {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(255)
+  eventDate   DateTime @map("event_date") @db.Date
+  location    String?  @db.VarChar(255)
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator       User?             @relation("EventCreator", fields: [createdBy], references: [id])
+  permissions   EventPermission[]
+  runners       Runner[]
+  photos        Photo[]
+  paymentConfig PaymentConfig?
+
+  @@map("events")
+}
+
+model EventPermission {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId    String   @map("event_id") @db.Uuid
+  uploaderId String   @map("uploader_id") @db.Uuid
+  canUpload  Boolean  @default(true) @map("can_upload")
+  canDelete  Boolean  @default(false) @map("can_delete")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  event    Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  uploader User  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, uploaderId])
+  @@map("event_permissions")
+}
+
+model Runner {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  bibNumber String   @map("bib_number") @db.VarChar(50)
+  fullName  String   @map("full_name") @db.VarChar(255)
+  category  String?  @db.VarChar(100)
+  team      String?  @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  event          Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photoTags      PhotoTag[]
+  faceEmbeddings FaceEmbedding[]
+
+  @@unique([eventId, bibNumber])
+  @@index([eventId, bibNumber])
+  @@index([eventId, fullName])
+  @@map("runners")
+}
+
+model Photo {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId          String   @map("event_id") @db.Uuid
+  driveFileId      String   @map("drive_file_id") @db.VarChar(500)
+  driveThumbnailId String?  @map("drive_thumbnail_id") @db.VarChar(500)
+  originalFilename String?  @map("original_filename") @db.VarChar(255)
+  uploadedBy       String?  @map("uploaded_by") @db.Uuid
+  uploadDate       DateTime @default(now()) @map("upload_date") @db.Timestamptz(6)
+  fileSize         Int?     @map("file_size")
+  width            Int?
+  height           Int?
+  isProcessed      Boolean  @default(false) @map("is_processed")
+  downloadCount    Int      @default(0) @map("download_count")
+
+  event          Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  uploader       User?           @relation("PhotoUploader", fields: [uploadedBy], references: [id])
+  tags           PhotoTag[]
+  faceEmbeddings FaceEmbedding[]
+  payments       Payment[]       @relation("PhotoPayment")
+  downloadLogs   DownloadLog[]   @relation("PhotoDownload")
+
+  @@index([eventId])
+  @@index([uploadedBy])
+  @@map("photos")
+}
+
+model PhotoTag {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId    String   @map("photo_id") @db.Uuid
+  runnerId   String   @map("runner_id") @db.Uuid
+  confidence Float    @default(1.0) @db.Real
+  taggedBy   String?  @map("tagged_by") @db.Uuid
+  taggedAt   DateTime @default(now()) @map("tagged_at") @db.Timestamptz(6)
+
+  photo  Photo  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  runner Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
+  tagger User?  @relation(fields: [taggedBy], references: [id])
+
+  @@unique([photoId, runnerId])
+  @@index([photoId])
+  @@index([runnerId])
+  @@map("photo_tags")
+}
+
+model FaceEmbedding {
+  id          String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId     String                     @map("photo_id") @db.Uuid
+  embedding   Unsupported("vector(128)")
+  boundingBox Json?                      @map("bounding_box") @db.JsonB
+  runnerId    String?                    @map("runner_id") @db.Uuid
+  createdAt   DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  photo  Photo   @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  runner Runner? @relation(fields: [runnerId], references: [id])
+
+  @@index([photoId])
+  @@map("face_embeddings")
+}
+
+model ActivityLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String   @db.VarChar(100)
+  entityType String?  @map("entity_type") @db.VarChar(50)
+  entityId   String?  @map("entity_id") @db.Uuid
+  metadata   Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@map("activity_logs")
+}
+
+model PaymentConfig {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId           String   @unique @map("event_id") @db.Uuid
+  pricePerPhoto     Int      @default(0) @map("price_per_photo")
+  bankName          String?  @map("bank_name") @db.VarChar(100)
+  bankAccountNo     String?  @map("bank_account_no") @db.VarChar(50)
+  bankAccountName   String?  @map("bank_account_name") @db.VarChar(255)
+  qrCodeData        String?  @map("qr_code_data") @db.Text
+  notificationEmail String?  @map("notification_email") @db.VarChar(255)
+  isEnabled         Boolean  @default(false) @map("is_enabled")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  event    Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@map("payment_configs")
+}
+
+model Payment {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentConfigId String        @map("payment_config_id") @db.Uuid
+  photoId         String?       @map("photo_id") @db.Uuid
+  userEmail       String        @map("user_email") @db.VarChar(255)
+  userName        String?       @map("user_name") @db.VarChar(255)
+  userPhone       String?       @map("user_phone") @db.VarChar(20)
+  amount          Int
+  transactionCode String        @unique @map("transaction_code") @db.VarChar(50)
+  transferContent String?       @map("transfer_content") @db.VarChar(500)
+  status          PaymentStatus @default(pending)
+  verifiedBy      String?       @map("verified_by") @db.Uuid
+  verifiedAt      DateTime?     @map("verified_at") @db.Timestamptz(6)
+  notes           String?       @db.Text
+  metadata        Json?         @db.JsonB
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  paymentConfig PaymentConfig @relation(fields: [paymentConfigId], references: [id], onDelete: Cascade)
+  photo         Photo?        @relation("PhotoPayment", fields: [photoId], references: [id])
+  verifier      User?         @relation("PaymentVerifier", fields: [verifiedBy], references: [id])
+  downloadLogs  DownloadLog[] @relation("PaymentDownload")
+
+  @@index([paymentConfigId])
+  @@index([userEmail])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("payments")
+}
+
+model DownloadLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId      String   @map("photo_id") @db.Uuid
+  paymentId    String?  @map("payment_id") @db.Uuid
+  userEmail    String?  @map("user_email") @db.VarChar(255)
+  ipAddress    String?  @map("ip_address") @db.VarChar(50)
+  userAgent    String?  @map("user_agent") @db.Text
+  downloadedAt DateTime @default(now()) @map("downloaded_at") @db.Timestamptz(6)
+
+  photo   Photo    @relation("PhotoDownload", fields: [photoId], references: [id], onDelete: Cascade)
+  payment Payment? @relation("PaymentDownload", fields: [paymentId], references: [id])
+
+  @@index([photoId])
+  @@index([paymentId])
+  @@index([downloadedAt(sort: Desc)])
+  @@map("download_logs")
+}
