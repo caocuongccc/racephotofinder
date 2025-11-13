@@ -5,13 +5,11 @@ import prisma from '@/lib/prisma'
 import { generateNAPASQR } from '@/lib/qr-code'
 
 // GET /api/admin/payment-config/[eventId]
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { eventId: string } }
-) {
+export async function GET(req: NextRequest, context: { params: Promise<{ eventId: string }> })
+ {
   try {
     const config = await prisma.paymentConfig.findUnique({
-      where: { eventId: params.eventId },
+      where: { eventId: context.params },
     })
 
     return NextResponse.json(config || null)
