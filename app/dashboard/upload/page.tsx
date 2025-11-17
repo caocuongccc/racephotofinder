@@ -21,6 +21,7 @@ interface UploadFile {
   progress: number
   photoId?: string
   error?: string
+  autoDetected?: boolean // NEW: Auto-detection flag
 }
 
 export default function UploadPage() {
@@ -105,7 +106,7 @@ export default function UploadPage() {
         if (!urlResponse.ok) {
           throw new Error('Failed to get upload URL')
         }
-
+console.error('urlResponse:', urlResponse)
         const { photoId } = await urlResponse.json()
 
         setFiles((prev) =>
@@ -120,7 +121,7 @@ export default function UploadPage() {
           method: 'POST',
           body: formData,
         })
-
+console.error('uploadResponse:', uploadResponse)
         if (!uploadResponse.ok) {
           throw new Error('Failed to upload file')
         }
