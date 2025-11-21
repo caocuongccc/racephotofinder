@@ -1,9 +1,13 @@
+// ============================================
+// FILE 2: app/api/photos/[id]/confirm/route.ts
+// THAY THẾ HOÀN TOÀN
+// ============================================
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import sharp from "sharp";
-import { uploadToGoogleDrive, generateFileKey } from "@/lib/google-drive";
+import { uploadToImgbb, generateImgbbFileName } from "@/lib/imgbb";
 
 // POST /api/photos/[id]/confirm - Confirm upload and process photo
 export async function POST(
@@ -12,8 +16,8 @@ export async function POST(
 ) {
   try {
     const session = await getServerSession(authOptions);
-    console.log("📤 session upload:",session)
     const params = await context.params;
+
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -74,74 +78,37 @@ export async function POST(
 
       console.log("✅ Thumbnail generated");
 
-      // Generate watermarked version for preview
-      const watermarkText = "RacePhoto Finder";
-      const watermarkedBuffer = await sharp(buffer)
-        .resize(1200, null, {
-          withoutEnlargement: true,
-          fit: "inside",
-        })
-        .composite([
-          {
-            input: Buffer.from(
-              `<svg width="1200" height="100">
-                <text x="50%" y="50" 
-                  font-family="Arial" 
-                  font-size="36" 
-                  fill="rgba(255,255,255,0.5)" 
-                  text-anchor="middle">
-                  ${watermarkText}
-                </text>
-              </svg>`
-            ),
-            gravity: "center",
-          },
-        ])
-        .jpeg({ quality: 85 })
-        .toBuffer();
-
-      console.log("✅ Watermark generated");
-
-      // Upload to Google Drive
-      const originalKey = generateFileKey(
+      // Generate unique filenames
+      const originalFileName = generateImgbbFileName(
         photo.eventId,
-        photo.originalFilename!,
+        file.name,
         "original"
       );
-      const thumbnailKey = generateFileKey(
+      const thumbnailFileName = generateImgbbFileName(
         photo.eventId,
-        photo.originalFilename!,
+        file.name,
         "thumbnail"
       );
 
-      console.log("📤 Uploading to Google Drive...");
+      console.log("📤 Uploading to Imgbb...");
 
+      // Upload both images to Imgbb in parallel
       const [originalUpload, thumbnailUpload] = await Promise.all([
-        uploadToGoogleDrive(
-          originalKey.fileName,
-          buffer,
-          "image/jpeg",
-          originalKey.folderPath
-        ),
-        uploadToGoogleDrive(
-          thumbnailKey.fileName,
-          thumbnailBuffer,
-          "image/jpeg",
-          thumbnailKey.folderPath
-        ),
+        uploadToImgbb(buffer, originalFileName),
+        uploadToImgbb(thumbnailBuffer, thumbnailFileName),
       ]);
 
-      console.log("✅ Uploaded to Google Drive:", {
-        originalId: originalUpload.fileId,
-        thumbnailId: thumbnailUpload.fileId,
+      console.log("✅ Uploaded to Imgbb:", {
+        originalId: originalUpload.id,
+        thumbnailId: thumbnailUpload.id,
       });
 
-      // Update photo record
+      // Update photo record với URLs từ Imgbb
       const updatedPhoto = await prisma.photo.update({
         where: { id: params.id },
         data: {
-          driveFileId: originalUpload.fileId,
-          driveThumbnailId: thumbnailUpload.fileId,
+          driveFileId: originalUpload.url, // URL gốc từ Imgbb
+          driveThumbnailId: thumbnailUpload.thumbnailUrl, // Thumbnail URL
           width: metadata.width,
           height: metadata.height,
           fileSize: buffer.length,
@@ -154,7 +121,7 @@ export async function POST(
       // AUTO-DETECT BIB & TAG (chạy async, không block response)
       autoDetectAndTag(
         updatedPhoto.id,
-        originalUpload.fileId,
+        originalUpload.url,
         photo.eventId
       ).catch((err) => {
         console.error("❌ Auto-detect failed:", err);
@@ -168,7 +135,6 @@ export async function POST(
       console.error("❌ Error processing image FULL:", {
         message: processError.message,
         stack: processError.stack,
-        cause: processError.cause,
       });
 
       // Update photo status as error
@@ -202,7 +168,7 @@ export async function POST(
 // Auto-detect BIB numbers and tag photos (background job)
 async function autoDetectAndTag(
   photoId: string,
-  driveFileId: string,
+  photoUrl: string,
   eventId: string
 ) {
   try {
@@ -210,10 +176,6 @@ async function autoDetectAndTag(
 
     // Import OCR service
     const { extractBibNumbers } = await import("@/lib/ocr");
-    const { getDirectDownloadUrl } = await import("@/lib/google-drive");
-
-    // Get photo URL
-    const photoUrl = getDirectDownloadUrl(driveFileId);
 
     // Extract BIB numbers using OCR
     const detections = await extractBibNumbers(photoUrl);
@@ -257,7 +219,7 @@ async function autoDetectAndTag(
         return {
           photoId,
           runnerId: runner.id,
-          confidence: detection?.confidence || 0.7, // OCR confidence
+          confidence: detection?.confidence || 0.7,
           taggedBy: null, // Auto-tagged by system
         };
       }),

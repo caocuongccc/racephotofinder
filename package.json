@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "create-admin": "tsx scripts/create-admin.ts"
+    "create-admin": "tsx scripts/create-admin.ts",
+    "build": "prisma generate && next build",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@aws-sdk/s3-request-presigner": "^3.928.0",

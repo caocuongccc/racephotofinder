@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import prisma from '@/lib/prisma'
-import { sendEmail } from '@/lib/email'
-import { getDirectDownloadUrl } from '@/lib/google-drive'
+// ============================================
+// FILE 6: app/api/payments/[id]/verify/route.ts
+// CẬP NHẬT VERIFY PAYMENT (remove getDirectDownloadUrl)
+// ============================================
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+import { sendEmail } from "@/lib/email";
 
 // POST /api/payments/[id]/verify - Admin verify payment
 export async function POST(
@@ -11,17 +14,21 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions)
-    const params = await context.params
-    if (!session || (session.user.role !== 'admin' && session.user.role !== 'uploader')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const session = await getServerSession(authOptions);
+    const params = await context.params;
+
+    if (
+      !session ||
+      (session.user.role !== "admin" && session.user.role !== "uploader")
+    ) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { status, notes } = body // 'verified' or 'rejected'
+    const body = await request.json();
+    const { status, notes } = body;
 
-    if (!['verified', 'rejected'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    if (!["verified", "rejected"].includes(status)) {
+      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
 
     // Get payment
@@ -33,10 +40,10 @@ export async function POST(
           include: { event: true },
         },
       },
-    })
+    });
 
     if (!payment) {
-      return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
     }
 
     // Update payment status
@@ -48,11 +55,12 @@ export async function POST(
         verifiedAt: new Date(),
         notes,
       },
-    })
+    });
 
     // If verified, send email with download link
-    if (status === 'verified' && payment.photo) {
-      const downloadUrl = await getDirectDownloadUrl(payment.photo.driveFileId) // 24 hours
+    if (status === "verified" && payment.photo) {
+      // Imgbb URL đã public, dùng trực tiếp
+      const downloadUrl = payment.photo.driveFileId; // Imgbb full-size URL
 
       await sendEmail({
         to: payment.userEmail,
@@ -85,7 +93,7 @@ export async function POST(
                   <div class="info-box">
                     <p><strong>Thông tin thanh toán:</strong></p>
                     <p>Mã giao dịch: <strong>${payment.transactionCode}</strong></p>
-                    <p>Số tiền: <strong>${payment.amount.toLocaleString('vi-VN')} VNĐ</strong></p>
+                    <p>Số tiền: <strong>${payment.amount.toLocaleString("vi-VN")} VNĐ</strong></p>
                     <p>Sự kiện: <strong>${payment.paymentConfig.event.name}</strong></p>
                   </div>
                   
@@ -96,7 +104,7 @@ export async function POST(
                   </a>
                   
                   <p style="margin-top: 30px; color: #666; font-size: 14px;">
-                    ⚠️ Link tải có hiệu lực trong 24 giờ. Vui lòng tải ảnh trong thời gian này.
+                    💡 Link tải có hiệu lực vô thời hạn. Bạn có thể tải lại bất cứ lúc nào.
                   </p>
                   
                   <p style="color: #666; font-size: 14px;">
@@ -107,14 +115,14 @@ export async function POST(
             </body>
           </html>
         `,
-      })
+      });
 
       // Mark as completed
       await prisma.payment.update({
         where: { id: params.id },
-        data: { status: 'completed' },
-      })
-    } else if (status === 'rejected') {
+        data: { status: "completed" },
+      });
+    } else if (status === "rejected") {
       // Send rejection email
       await sendEmail({
         to: payment.userEmail,
@@ -127,7 +135,7 @@ export async function POST(
               
               <p>Rất tiếc, thanh toán của bạn không được xác nhận.</p>
               
-              <p><strong>Lý do:</strong> ${notes || 'Không tìm thấy giao dịch'}</p>
+              <p><strong>Lý do:</strong> ${notes || "Không tìm thấy giao dịch"}</p>
               
               <p>Vui lòng kiểm tra lại thông tin chuyển khoản và thử lại.</p>
               
@@ -135,22 +143,26 @@ export async function POST(
             </body>
           </html>
         `,
-      })
+      });
     }
 
-    return NextResponse.json({ success: true, payment: updatedPayment })
+    return NextResponse.json({ success: true, payment: updatedPayment });
   } catch (error) {
-    console.error('Error verifying payment:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error verifying payment:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
-// GET /api/payments/[id] - Check payment status
+// GET không thay đổi
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params;
     const payment = await prisma.payment.findUnique({
       where: { id: params.id },
       select: {
@@ -161,15 +173,18 @@ export async function GET(
         createdAt: true,
         verifiedAt: true,
       },
-    })
+    });
 
     if (!payment) {
-      return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
     }
 
-    return NextResponse.json(payment)
+    return NextResponse.json(payment);
   } catch (error) {
-    console.error('Error fetching payment:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error fetching payment:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
