@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { uploadToGoogleDrive } from "./lib/google-drive";
+import { uploadToGoogleDrive } from "../lib/google-drive";
 import "dotenv/config";
 async function finalTest() {
   console.log("🚀 Final Test\n");
@@ -44,7 +44,7 @@ async function finalTest() {
     console.log("   Folder:", folder.data.name);
     console.log(
       "   Can add children:",
-      folder.data.capabilities?.canAddChildren
+      folder.data.capabilities?.canAddChildren,
     );
   } catch (error: any) {
     console.error("❌ Folder access failed:", error.message);
@@ -60,7 +60,7 @@ async function finalTest() {
       "test-final.txt",
       Buffer.from("Hello from RacePhoto Finder!"),
       "text/plain",
-      ["test"]
+      ["test"],
     );
     console.log("✅ Upload successful!");
     console.log("   File ID:", result.fileId);

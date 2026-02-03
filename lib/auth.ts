@@ -1,46 +1,58 @@
-import { NextAuthOptions } from 'next-auth'
-import CredentialsProvider from 'next-auth/providers/credentials'
-import { compare } from 'bcryptjs'
-import prisma from './prisma'
+import { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import { compare } from "bcryptjs";
+import { prisma } from "./prisma";
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET!, // 👈 BẮT BUỘC TRONG NEXT.JS 16
+
   session: {
-    strategy: 'jwt',
+    strategy: "jwt",
   },
+
+  jwt: {
+    encryption: false, // 👈 BẮT BUỘC TRONG NEXT.JS 16
+    maxAge: 60 * 60 * 24 * 30,
+  },
+
+  adapter: PrismaAdapter(prisma),
+
   pages: {
-    signIn: '/login',
+    signIn: "/login",
   },
   providers: [
     CredentialsProvider({
-      name: 'Credentials',
+      name: "credentials",
       credentials: {
-        email: { label: 'Email', type: 'email' },
-        password: { label: 'Password', type: 'password' },
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Email và mật khẩu không được để trống')
+          throw new Error("Email và mật khẩu là bắt buộc");
         }
-
+        console.log("Attempting to authorize user:", credentials);
         const user = await prisma.user.findUnique({
           where: { email: credentials.email },
-        })
-
-        if (!user) {
-          throw new Error('Email hoặc mật khẩu không đúng')
+        });
+        console.log("passwordHash found:", user.passwordHash);
+        console.log("User found:", user);
+        if (!user || !user.passwordHash) {
+          throw new Error("Email hoặc mật khẩu không đúng");
         }
 
         if (!user.isActive) {
-          throw new Error('Tài khoản đã bị khóa')
+          throw new Error("Tài khoản đã bị khóa");
         }
 
         const isPasswordValid = await compare(
           credentials.password,
-          user.passwordHash
-        )
+          user.passwordHash,
+        );
 
         if (!isPasswordValid) {
-          throw new Error('Email hoặc mật khẩu không đúng')
+          throw new Error("Email hoặc mật khẩu không đúng");
         }
 
         return {
@@ -48,45 +60,45 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           role: user.role,
-        }
+        };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id
-        token.role = user.role
+        token.id = user.id;
+        token.role = user.role;
       }
-      return token
+      return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id as string
-        session.user.role = token.role as string
+        session.user.id = token.id as string;
+        session.user.role = token.role as string;
       }
-      return session
+      return session;
     },
   },
-}
+};
 
-declare module 'next-auth' {
+declare module "next-auth" {
   interface User {
-    id: string
-    role: string
+    id: string;
+    role: string;
   }
 
   interface Session {
     user: User & {
-      id: string
-      role: string
-    }
+      id: string;
+      role: string;
+    };
   }
 }
 
-declare module 'next-auth/jwt' {
+declare module "next-auth/jwt" {
   interface JWT {
-    id: string
-    role: string
+    id: string;
+    role: string;
   }
 }

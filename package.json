@@ -13,6 +13,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@auth/prisma-adapter": "^2.11.1",
     "@aws-sdk/s3-request-presigner": "^3.928.0",
     "@google-cloud/storage": "^7.17.3",
     "@headlessui/react": "^2.2.9",
@@ -20,11 +21,13 @@
     "@prisma/client": "^6.19.0",
     "bcryptjs": "^3.0.3",
     "client-s3": "github:aws-sdk/client-s3",
+    "cloudinary": "^2.9.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "firebase": "^12.5.0",
     "firebase-admin": "^13.6.0",
     "fs": "^0.0.1-security",
+    "google-auth-library": "^10.5.0",
     "googleapis": "^133.0.0",
     "lucide-react": "^0.553.0",
     "next": "16.0.1",

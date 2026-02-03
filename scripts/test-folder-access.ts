@@ -6,9 +6,9 @@ async function testFolderAccess() {
       client_email: process.env.GOOGLE_DRIVE_CLIENT_EMAIL,
       private_key: process.env.GOOGLE_DRIVE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
     },
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
-
+  console.log("🔑 Auth initialized", auth);
   const drive = google.drive({ version: "v3", auth });
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
 
@@ -21,6 +21,7 @@ async function testFolderAccess() {
     const folder = await drive.files.get({
       fileId: folderId,
       fields: "id, name, owners, permissions, capabilities",
+      supportsAllDrives: true,
     });
 
     console.log("✅ Folder found!");
@@ -37,13 +38,14 @@ async function testFolderAccess() {
     console.log("\n📋 Folder permissions:");
     permissions.data.permissions?.forEach((perm) => {
       console.log(
-        `  - ${perm.type}: ${perm.emailAddress || "anyone"} (${perm.role})`
+        `  - ${perm.type}: ${perm.emailAddress || "anyone"} (${perm.role})`,
       );
     });
 
     // Try to create a test file
     console.log("\n📤 Testing file creation...");
     const testFile = await drive.files.create({
+      supportsAllDrives: true,
       requestBody: {
         name: "test-access.txt",
         parents: [folderId],
@@ -68,7 +70,7 @@ async function testFolderAccess() {
       console.log("\n⚠️  Folder not found or not shared with service account.");
       console.log(
         "Please share the folder with:",
-        process.env.GOOGLE_DRIVE_CLIENT_EMAIL
+        process.env.GOOGLE_DRIVE_CLIENT_EMAIL,
       );
     }
   }

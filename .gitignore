@@ -43,3 +43,4 @@ next-env.d.ts
 /app/generated/prisma
 firebase-service-account.json
 google-service-account.json
+*.json
