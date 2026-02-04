@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { getDirectDownloadUrl } from "@/lib/google-drive";
+import { getDownloadUrl } from "@/lib/google-drive-oauth";
 import { extractBibNumbers } from "@/lib/ocr";
 import toast from "react-hot-toast";
 
 // POST /api/photos/[id]/ocr - Extract BIB numbers using OCR
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
     toast.success("OCR process params" + JSON.stringify(context.params));
@@ -33,7 +33,7 @@ export async function POST(
     }
 
     // Get photo URL
-    const photoUrl = await getDirectDownloadUrl(photo.driveFileId);
+    const photoUrl = await getDownloadUrl("", photo.driveFileId);
     toast.success("OCR process started photoUrl" + photoUrl);
     // Extract BIB numbers
     const detections = await extractBibNumbers(photoUrl);
@@ -67,7 +67,7 @@ export async function POST(
       await prisma.photoTag.createMany({
         data: runners.map((runner) => {
           const detection = detections.find(
-            (d) => d.bibNumber === runner.bibNumber
+            (d) => d.bibNumber === runner.bibNumber,
           );
           return {
             photoId: params.id,
@@ -89,7 +89,7 @@ export async function POST(
     console.error("OCR error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -1,17 +1,18 @@
 // ============================================
-// FILE 2: app/api/photos/[id]/confirm/route.ts
-// THAY THẾ HOÀN TOÀN
+// FILE: app/api/photos/[id]/confirm/route.ts
+// FINAL VERSION - Google OAuth + Optimized OCR
 // ============================================
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import sharp from "sharp";
-import { uploadToImgbb, generateImgbbFileName } from "@/lib/imgbb";
-import { generateFileKey, uploadToGoogleDrive } from "@/lib/google-drive-oauth";
+import {
+  uploadToGoogleDrive,
+  generateFileKey,
+  getDownloadUrl,
+} from "@/lib/google-drive-oauth";
 
-// POST /api/photos/[id]/confirm - Confirm upload and process photo
-// app/api/photos/[id]/confirm/route.ts
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -20,33 +21,40 @@ export async function POST(
 
   try {
     const session = await getServerSession(authOptions);
-    console.log("📤 Upload session:", {
-      userId: session?.user?.id,
-      role: session?.user?.role,
-      photoId: params.id,
-    });
 
     if (!session) {
       return NextResponse.json(
-        {
-          error: "Unauthorized - No session found",
-        },
+        { error: "Unauthorized - No session found" },
         { status: 401 },
       );
     }
-    // Check if user has connected Google Drive
+
+    // ============================================
+    // 1. CHECK GOOGLE DRIVE CONNECTION
+    // ============================================
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { googleAccessToken: true },
+      select: {
+        googleAccessToken: true,
+        googleRefreshToken: true,
+      },
     });
 
-    if (!user?.googleAccessToken) {
+    if (!user?.googleAccessToken || !user?.googleRefreshToken) {
       return NextResponse.json(
-        { error: "Please connect your Google Drive account first" },
+        {
+          error: "Please connect your Google Drive account first",
+          needsAuth: true,
+        },
         { status: 400 },
       );
     }
-    // Get photo record với error checking
+
+    console.log("✅ Google Drive connected for user:", session.user.email);
+
+    // ============================================
+    // 2. GET PHOTO RECORD & VERIFY PERMISSION
+    // ============================================
     const photo = await prisma.photo.findUnique({
       where: { id: params.id },
       include: {
@@ -56,52 +64,30 @@ export async function POST(
     });
 
     if (!photo) {
-      console.error("❌ Photo not found:", params.id);
       return NextResponse.json(
-        {
-          error: "Photo record not found",
-        },
+        { error: "Photo record not found" },
         { status: 404 },
       );
     }
 
-    console.log("✅ Photo record found:", {
-      photoId: photo.id,
-      eventId: photo.eventId,
-      uploadedBy: photo.uploadedBy,
-    });
-
-    // Verify permissions với chi tiết hơn
     const isUploader = photo.uploadedBy === session.user.id;
     const isAdmin = session.user.role === "admin";
-    const hasPermission = isUploader || isAdmin;
 
-    if (!hasPermission) {
-      console.error("❌ Permission denied:", {
-        sessionUserId: session.user.id,
-        photoUploaderId: photo.uploadedBy,
-        userRole: session.user.role,
-      });
+    if (!isUploader && !isAdmin) {
       return NextResponse.json(
-        {
-          error: "Forbidden - No permission to confirm this upload",
-        },
+        { error: "Forbidden - No permission" },
         { status: 403 },
       );
     }
 
-    // Get file from form data
+    // ============================================
+    // 3. GET FILE FROM FORM DATA
+    // ============================================
     const formData = await request.formData();
     const file = formData.get("file") as File;
 
     if (!file) {
-      console.error("❌ No file in form data");
-      return NextResponse.json(
-        {
-          error: "No file provided",
-        },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
     console.log("📤 Processing upload:", {
@@ -110,12 +96,12 @@ export async function POST(
       type: file.type,
     });
 
-    // Convert to buffer
+    // ============================================
+    // 4. PROCESS IMAGE
+    // ============================================
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    console.log("✅ Buffer created:", buffer.length, "bytes");
 
-    // Get metadata
     const metadata = await sharp(buffer).metadata();
     console.log("✅ Image metadata:", {
       width: metadata.width,
@@ -131,9 +117,10 @@ export async function POST(
       })
       .jpeg({ quality: 80 })
       .toBuffer();
-    console.log("✅ Thumbnail generated:", thumbnailBuffer.length, "bytes");
 
-    // Upload to Google Drive
+    // ============================================
+    // 5. UPLOAD TO GOOGLE DRIVE (USER'S DRIVE)
+    // ============================================
     const originalKey = generateFileKey(
       photo.eventId,
       photo.originalFilename!,
@@ -145,13 +132,11 @@ export async function POST(
       "thumbnail",
     );
 
-    console.log("📤 Uploading to Google Drive:", {
-      originalPath: originalKey.folderPath.join("/"),
-      thumbnailPath: thumbnailKey.folderPath.join("/"),
-    });
+    console.log("📤 Uploading to user's Google Drive...");
 
     const [originalUpload, thumbnailUpload] = await Promise.all([
       uploadToGoogleDrive(
+        session.user.id, // ✅ userId for OAuth
         originalKey.fileName,
         buffer,
         "image/jpeg",
@@ -161,6 +146,7 @@ export async function POST(
         throw new Error(`Failed to upload original: ${err.message}`);
       }),
       uploadToGoogleDrive(
+        session.user.id, // ✅ userId for OAuth
         thumbnailKey.fileName,
         thumbnailBuffer,
         "image/jpeg",
@@ -176,7 +162,9 @@ export async function POST(
       thumbnailId: thumbnailUpload.fileId,
     });
 
-    // Update database
+    // ============================================
+    // 6. UPDATE DATABASE
+    // ============================================
     const updatedPhoto = await prisma.photo.update({
       where: { id: params.id },
       data: {
@@ -191,14 +179,16 @@ export async function POST(
 
     console.log("✅ Database updated successfully");
 
-    // AUTO-DETECT BIB & TAG (async, non-blocking)
-    autoDetectAndTag(
+    // ============================================
+    // 7. AUTO-DETECT & AUTO-CREATE RUNNERS (ASYNC)
+    // ============================================
+    autoDetectAndCreateRunner(
       updatedPhoto.id,
       originalUpload.fileId,
       photo.eventId,
+      session.user.id,
     ).catch((err) => {
       console.error("❌ Auto-detect failed:", err);
-      // Log to database for debugging
       prisma.activityLog
         .create({
           data: {
@@ -208,7 +198,6 @@ export async function POST(
             entityId: updatedPhoto.id,
             metadata: {
               error: err.message,
-              stack: err.stack,
             },
           },
         })
@@ -220,22 +209,15 @@ export async function POST(
       photo: updatedPhoto,
     });
   } catch (error: any) {
-    console.error("❌ Upload confirmation error:", {
-      message: error.message,
-      stack: error.stack,
-      photoId: params.id,
-    });
+    console.error("❌ Upload confirmation error:", error);
 
-    // Update photo status as error
     try {
       await prisma.photo.update({
         where: { id: params.id },
-        data: {
-          isProcessed: false,
-        },
+        data: { isProcessed: false },
       });
     } catch (dbError) {
-      console.error("❌ Failed to update photo error status:", dbError);
+      console.error("❌ Failed to update photo status:", dbError);
     }
 
     return NextResponse.json(
@@ -247,26 +229,35 @@ export async function POST(
     );
   }
 }
-async function autoDetectAndTag(
+
+// ============================================
+// AUTO-DETECT WITH OPTIMIZED OCR
+// ============================================
+async function autoDetectAndCreateRunner(
   photoId: string,
   driveFileId: string,
   eventId: string,
+  userId: string,
 ) {
   try {
     console.log("🔍 Auto-detecting BIB for photo:", photoId);
 
-    const { multiRegionOCR } = await import("@/lib/ocr");
-    const { getDirectDownloadUrl } = await import("@/lib/google-drive");
+    // Import optimized OCR
+    const { detectBibNumbersOptimized } = await import("@/lib/ocr-optimized");
+    const { getDownloadUrl } = await import("@/lib/google-drive-oauth");
 
-    const photoUrl = getDirectDownloadUrl(driveFileId);
+    // Get photo URL
+    const photoUrl = await getDownloadUrl(userId, driveFileId);
 
-    // Use improved multi-region OCR
-    const detections = await multiRegionOCR(photoUrl);
+    // ============================================
+    // OPTIMIZED OCR DETECTION
+    // Handles: blur, skew, noise, low contrast
+    // ============================================
+    const detections = await detectBibNumbersOptimized(photoUrl);
 
     if (detections.length === 0) {
       console.log("⚠️ No BIB numbers detected");
 
-      // Log for review
       await prisma.activityLog.create({
         data: {
           userId: null,
@@ -280,50 +271,75 @@ async function autoDetectAndTag(
       return;
     }
 
-    console.log("✅ Detected BIBs:", detections);
+    console.log(
+      "✅ Detected BIBs:",
+      detections.map((d) => ({
+        bib: d.bibNumber,
+        conf: Math.round(d.confidence * 100) + "%",
+        region: d.region,
+      })),
+    );
 
-    // Find matching runners
+    // ============================================
+    // AUTO-CREATE RUNNERS IF NOT EXISTS
+    // ============================================
     const bibNumbers = detections.map((d) => d.bibNumber);
-    const runners = await prisma.runner.findMany({
+
+    const existingRunners = await prisma.runner.findMany({
       where: {
         eventId,
         bibNumber: { in: bibNumbers },
       },
     });
 
-    if (runners.length === 0) {
-      console.log("⚠️ No matching runners found for:", bibNumbers);
+    const existingBibNumbers = new Set(existingRunners.map((r) => r.bibNumber));
 
-      // Log for manual review
-      await prisma.activityLog.create({
-        data: {
-          userId: null,
-          action: "auto_detect_no_match",
-          entityType: "photo",
-          entityId: photoId,
-          metadata: {
-            detectedBibs: bibNumbers,
-            eventId,
-          },
-        },
+    const newBibNumbers = bibNumbers.filter(
+      (bib) => !existingBibNumbers.has(bib),
+    );
+
+    // Create new runners
+    if (newBibNumbers.length > 0) {
+      console.log("✅ Auto-creating runners for BIBs:", newBibNumbers);
+
+      await prisma.runner.createMany({
+        data: newBibNumbers.map((bibNumber) => ({
+          eventId,
+          bibNumber,
+          fullName: null,
+          isAutoDetected: true,
+          isVerified: false,
+        })),
+        skipDuplicates: true,
       });
 
-      return;
+      console.log(`✅ Created ${newBibNumbers.length} new runners`);
     }
 
-    console.log("✅ Found runners:", runners);
-
-    // Delete existing auto-tags (keep manual tags)
-    await prisma.photoTag.deleteMany({
+    // Get all runners
+    const allRunners = await prisma.runner.findMany({
       where: {
-        photoId,
-        taggedBy: null, // Auto-tagged
+        eventId,
+        bibNumber: { in: bibNumbers },
       },
     });
 
-    // Create new auto-tags
+    if (allRunners.length === 0) {
+      console.log("⚠️ No runners found after auto-create");
+      return;
+    }
+
+    // Delete existing auto-tags
+    await prisma.photoTag.deleteMany({
+      where: {
+        photoId,
+        taggedBy: null,
+      },
+    });
+
+    // Create new tags
     await prisma.photoTag.createMany({
-      data: runners.map((runner) => {
+      data: allRunners.map((runner) => {
         const detection = detections.find(
           (d) => d.bibNumber === runner.bibNumber,
         );
@@ -331,32 +347,37 @@ async function autoDetectAndTag(
           photoId,
           runnerId: runner.id,
           confidence: detection?.confidence || 0.7,
-          taggedBy: null, // Auto-tagged
+          taggedBy: null,
         };
       }),
       skipDuplicates: true,
     });
 
-    console.log("✅ Auto-tagged photo with", runners.length, "runners");
+    console.log("✅ Auto-tagged photo with", allRunners.length, "runners");
 
     // Log success
     await prisma.activityLog.create({
       data: {
         userId: null,
-        action: "auto_tag_success",
+        action: "auto_detect_success",
         entityType: "photo",
         entityId: photoId,
         metadata: {
           detectedBibs: bibNumbers,
-          matchedRunners: runners.length,
-          confidence: detections.map((d) => d.confidence),
+          createdRunners: newBibNumbers,
+          totalTagged: allRunners.length,
+          avgConfidence:
+            Math.round(
+              (detections.reduce((sum, d) => sum + d.confidence, 0) /
+                detections.length) *
+                100,
+            ) / 100,
         },
       },
     });
   } catch (error: any) {
     console.error("❌ Auto-detect error:", error);
 
-    // Log error
     await prisma.activityLog
       .create({
         data: {

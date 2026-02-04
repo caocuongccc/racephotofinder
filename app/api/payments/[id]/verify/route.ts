@@ -11,7 +11,7 @@ import { sendEmail } from "@/lib/email";
 // POST /api/payments/[id]/verify - Admin verify payment
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -151,7 +151,7 @@ export async function POST(
     console.error("Error verifying payment:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -159,7 +159,7 @@ export async function POST(
 // GET không thay đổi
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
     const params = await context.params;
@@ -184,7 +184,7 @@ export async function GET(
     console.error("Error fetching payment:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
