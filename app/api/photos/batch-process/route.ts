@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { getDownloadUrl, getDownloadUrl } from "@/lib/google-drive-oauth";
+import { getDownloadUrl } from "@/lib/google-drive-oauth";
 import { extractBibNumbers } from "@/lib/ocr";
 
 // POST /api/photos/batch-process - Batch process photos (OCR + Face detection)
