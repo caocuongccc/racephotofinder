@@ -1,6 +1,6 @@
 // ============================================
 // FILE: app/api/photos/[id]/confirm/route.ts
-// FINAL VERSION - Google OAuth + Optimized OCR
+// WITH MULTI-ENGINE OCR SUPPORT
 // ============================================
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -29,9 +29,6 @@ export async function POST(
       );
     }
 
-    // ============================================
-    // 1. CHECK GOOGLE DRIVE CONNECTION
-    // ============================================
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
       select: {
@@ -52,9 +49,6 @@ export async function POST(
 
     console.log("✅ Google Drive connected for user:", session.user.email);
 
-    // ============================================
-    // 2. GET PHOTO RECORD & VERIFY PERMISSION
-    // ============================================
     const photo = await prisma.photo.findUnique({
       where: { id: params.id },
       include: {
@@ -80,9 +74,6 @@ export async function POST(
       );
     }
 
-    // ============================================
-    // 3. GET FILE FROM FORM DATA
-    // ============================================
     const formData = await request.formData();
     const file = formData.get("file") as File;
 
@@ -96,9 +87,6 @@ export async function POST(
       type: file.type,
     });
 
-    // ============================================
-    // 4. PROCESS IMAGE
-    // ============================================
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
@@ -109,7 +97,6 @@ export async function POST(
       format: metadata.format,
     });
 
-    // Generate thumbnail
     const thumbnailBuffer = await sharp(buffer)
       .resize(400, null, {
         withoutEnlargement: true,
@@ -118,9 +105,6 @@ export async function POST(
       .jpeg({ quality: 80 })
       .toBuffer();
 
-    // ============================================
-    // 5. UPLOAD TO GOOGLE DRIVE (USER'S DRIVE)
-    // ============================================
     const originalKey = generateFileKey(
       photo.eventId,
       photo.originalFilename!,
@@ -136,7 +120,7 @@ export async function POST(
 
     const [originalUpload, thumbnailUpload] = await Promise.all([
       uploadToGoogleDrive(
-        session.user.id, // ✅ userId for OAuth
+        session.user.id,
         originalKey.fileName,
         buffer,
         "image/jpeg",
@@ -146,7 +130,7 @@ export async function POST(
         throw new Error(`Failed to upload original: ${err.message}`);
       }),
       uploadToGoogleDrive(
-        session.user.id, // ✅ userId for OAuth
+        session.user.id,
         thumbnailKey.fileName,
         thumbnailBuffer,
         "image/jpeg",
@@ -162,9 +146,6 @@ export async function POST(
       thumbnailId: thumbnailUpload.fileId,
     });
 
-    // ============================================
-    // 6. UPDATE DATABASE
-    // ============================================
     const updatedPhoto = await prisma.photo.update({
       where: { id: params.id },
       data: {
@@ -180,33 +161,25 @@ export async function POST(
     console.log("✅ Database updated successfully");
 
     // ============================================
-    // 7. AUTO-DETECT & AUTO-CREATE RUNNERS (ASYNC)
+    // MULTI-ENGINE OCR (BACKGROUND)
     // ============================================
-    autoDetectAndCreateRunner(
-      updatedPhoto.id,
-      originalUpload.fileId,
-      photo.eventId,
-      session.user.id,
-    ).catch((err) => {
-      console.error("❌ Auto-detect failed:", err);
-      prisma.activityLog
-        .create({
-          data: {
-            userId: session.user.id,
-            action: "auto_detect_failed",
-            entityType: "photo",
-            entityId: updatedPhoto.id,
-            metadata: {
-              error: err.message,
-            },
-          },
-        })
-        .catch(console.error);
+    console.log("🔍 Starting multi-engine auto-detect (background)...");
+
+    setImmediate(() => {
+      autoDetectMultiEngine(
+        updatedPhoto.id,
+        originalUpload.fileId,
+        photo.eventId,
+        session.user.id,
+      ).catch((err) => {
+        console.error("❌ Auto-detect failed:", err.message);
+      });
     });
 
     return NextResponse.json({
       success: true,
       photo: updatedPhoto,
+      message: "Upload successful. BIB detection running in background.",
     });
   } catch (error: any) {
     console.error("❌ Upload confirmation error:", error);
@@ -231,32 +204,42 @@ export async function POST(
 }
 
 // ============================================
-// AUTO-DETECT WITH OPTIMIZED OCR
+// AUTO-DETECT WITH MULTI-ENGINE OCR
 // ============================================
-async function autoDetectAndCreateRunner(
+async function autoDetectMultiEngine(
   photoId: string,
   driveFileId: string,
   eventId: string,
   userId: string,
 ) {
   try {
-    console.log("🔍 Auto-detecting BIB for photo:", photoId);
+    console.log("🔍 [Background] Auto-detecting BIB for photo:", photoId);
 
-    // Import optimized OCR
-    const { detectBibNumbersOptimized } = await import("@/lib/ocr-optimized");
     const { getDownloadUrl } = await import("@/lib/google-drive-oauth");
 
-    // Get photo URL
+    console.log("📥 [Background] Getting download URL...");
     const photoUrl = await getDownloadUrl(userId, driveFileId);
+    console.log("✅ [Background] Photo URL obtained");
 
-    // ============================================
-    // OPTIMIZED OCR DETECTION
-    // Handles: blur, skew, noise, low contrast
-    // ============================================
-    const detections = await detectBibNumbersOptimized(photoUrl);
+    // ✅ MULTI-ENGINE: Try all OCR services
+    console.log("🔍 [Background] Running multi-engine OCR...");
+
+    const { detectBibNumbersMultiEngine } = await import("@/lib/ocr-space-api");
+
+    const detections = await Promise.race([
+      detectBibNumbersMultiEngine(photoUrl, userId),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("OCR timeout (30s)")), 30000),
+      ),
+    ]).catch((err) => {
+      console.error("❌ [Background] All OCR engines failed:", err.message);
+      return [];
+    });
+
+    console.log(`✅ [Background] OCR returned ${detections.length} detections`);
 
     if (detections.length === 0) {
-      console.log("⚠️ No BIB numbers detected");
+      console.log("⚠️ [Background] No BIB numbers detected");
 
       await prisma.activityLog.create({
         data: {
@@ -272,17 +255,13 @@ async function autoDetectAndCreateRunner(
     }
 
     console.log(
-      "✅ Detected BIBs:",
+      "✅ [Background] Detected BIBs:",
       detections.map((d) => ({
         bib: d.bibNumber,
         conf: Math.round(d.confidence * 100) + "%",
-        region: d.region,
       })),
     );
 
-    // ============================================
-    // AUTO-CREATE RUNNERS IF NOT EXISTS
-    // ============================================
     const bibNumbers = detections.map((d) => d.bibNumber);
 
     const existingRunners = await prisma.runner.findMany({
@@ -292,31 +271,32 @@ async function autoDetectAndCreateRunner(
       },
     });
 
-    const existingBibNumbers = new Set(existingRunners.map((r) => r.bibNumber));
+    console.log(
+      `✅ [Background] Found ${existingRunners.length} existing runners`,
+    );
 
+    const existingBibNumbers = new Set(existingRunners.map((r) => r.bibNumber));
     const newBibNumbers = bibNumbers.filter(
       (bib) => !existingBibNumbers.has(bib),
     );
 
-    // Create new runners
     if (newBibNumbers.length > 0) {
-      console.log("✅ Auto-creating runners for BIBs:", newBibNumbers);
+      console.log("✅ [Background] Auto-creating runners:", newBibNumbers);
 
       await prisma.runner.createMany({
         data: newBibNumbers.map((bibNumber) => ({
           eventId,
           bibNumber,
-          fullName: null,
-          isAutoDetected: true,
-          isVerified: false,
+          fullName: `Runner ${bibNumber}`,
         })),
         skipDuplicates: true,
       });
 
-      console.log(`✅ Created ${newBibNumbers.length} new runners`);
+      console.log(
+        `✅ [Background] Created ${newBibNumbers.length} new runners`,
+      );
     }
 
-    // Get all runners
     const allRunners = await prisma.runner.findMany({
       where: {
         eventId,
@@ -324,12 +304,13 @@ async function autoDetectAndCreateRunner(
       },
     });
 
+    console.log(`✅ [Background] Total runners to tag: ${allRunners.length}`);
+
     if (allRunners.length === 0) {
-      console.log("⚠️ No runners found after auto-create");
+      console.log("⚠️ [Background] No runners found");
       return;
     }
 
-    // Delete existing auto-tags
     await prisma.photoTag.deleteMany({
       where: {
         photoId,
@@ -337,7 +318,6 @@ async function autoDetectAndCreateRunner(
       },
     });
 
-    // Create new tags
     await prisma.photoTag.createMany({
       data: allRunners.map((runner) => {
         const detection = detections.find(
@@ -353,9 +333,12 @@ async function autoDetectAndCreateRunner(
       skipDuplicates: true,
     });
 
-    console.log("✅ Auto-tagged photo with", allRunners.length, "runners");
+    console.log(
+      "✅ [Background] Auto-tagged photo with",
+      allRunners.length,
+      "runners",
+    );
 
-    // Log success
     await prisma.activityLog.create({
       data: {
         userId: null,
@@ -375,8 +358,10 @@ async function autoDetectAndCreateRunner(
         },
       },
     });
+
+    console.log("✅ [Background] Auto-detect completed successfully");
   } catch (error: any) {
-    console.error("❌ Auto-detect error:", error);
+    console.error("❌ [Background] Auto-detect error:", error.message);
 
     await prisma.activityLog
       .create({
@@ -387,7 +372,6 @@ async function autoDetectAndCreateRunner(
           entityId: photoId,
           metadata: {
             error: error.message,
-            stack: error.stack,
           },
         },
       })

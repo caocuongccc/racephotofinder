@@ -1,11 +1,21 @@
 // ============================================
-// FILE 5: app/api/admin/payments/route.ts
-// CẬP NHẬT GET PAYMENTS (remove getThumbnailUrl)
+// FILE: app/api/admin/payments/route.ts
+// FIX: Generate proper Google Drive URLs for payments
 // ============================================
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+
+// Helper function to generate Google Drive URLs
+function generateDriveUrls(fileId: string, thumbnailId: string | null) {
+  return {
+    photoUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
+    thumbnailUrl: thumbnailId
+      ? `https://drive.google.com/thumbnail?id=${thumbnailId}&sz=w400`
+      : `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`,
+  };
+}
 
 // GET /api/admin/payments
 export async function GET(request: NextRequest) {
@@ -43,7 +53,8 @@ export async function GET(request: NextRequest) {
         photo: {
           select: {
             id: true,
-            driveThumbnailId: true, // Imgbb URL
+            driveFileId: true,
+            driveThumbnailId: true,
           },
         },
       },
@@ -52,13 +63,16 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Imgbb URLs đã có sẵn, không cần generate
+    // Generate Google Drive URLs
     const paymentsWithUrls = payments.map((payment) => ({
       ...payment,
       photo: payment.photo
         ? {
             ...payment.photo,
-            thumbnailUrl: payment.photo.driveThumbnailId, // Imgbb URL
+            thumbnailUrl: generateDriveUrls(
+              payment.photo.driveFileId,
+              payment.photo.driveThumbnailId,
+            ).thumbnailUrl,
           }
         : null,
     }));
@@ -68,7 +82,7 @@ export async function GET(request: NextRequest) {
     console.error("Error fetching payments:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

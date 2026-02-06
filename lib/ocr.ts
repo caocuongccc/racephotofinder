@@ -1,7 +1,6 @@
 // ============================================
-// FILE: lib/ocr.ts - CẬP NHẬT
+// FILE: lib/ocr.ts - FIX FOR TESSERACT V5
 // ============================================
-// OCR service to extract BIB numbers from photos
 import { createWorker } from "tesseract.js";
 import sharp from "sharp";
 
@@ -10,10 +9,10 @@ import sharp from "sharp";
  */
 async function preprocessImage(buffer: Buffer): Promise<Buffer> {
   return await sharp(buffer)
-    .greyscale() // Convert to grayscale
-    .normalize() // Normalize contrast
-    .threshold(128) // Binary threshold
-    .sharpen() // Sharpen edges
+    .greyscale()
+    .normalize()
+    .threshold(128)
+    .sharpen()
     .toBuffer();
 }
 
@@ -29,7 +28,7 @@ export interface BibDetection {
 }
 
 /**
- * Extract BIB numbers from image
+ * Extract BIB numbers from image - FIXED FOR TESSERACT V5
  */
 export async function extractBibNumbers(
   imageUrl: string,
@@ -65,29 +64,62 @@ export async function extractBibNumbers(
 
     const bibNumbers: BibDetection[] = [];
 
-    // Process lines
-    if (data.lines && data.lines.length > 0) {
-      for (const line of data.lines) {
-        const text = line.text.trim();
+    // ✅ FIXED: Traverse through blocks → paragraphs → lines → words
+    if (data.blocks && data.blocks.length > 0) {
+      for (const block of data.blocks) {
+        for (const paragraph of block.paragraphs || []) {
+          for (const line of paragraph.lines || []) {
+            const lineText = line.text.trim();
 
-        // Look for patterns that match BIB numbers (1-5 digits)
-        const matches = text.match(/\b\d{1,5}\b/g);
+            // Look for patterns that match BIB numbers (1-5 digits)
+            const matches = lineText.match(/\b\d{1,5}\b/g);
 
-        if (matches) {
-          for (const match of matches) {
-            // Filter out obvious non-BIB numbers
-            const num = parseInt(match);
-            if (num >= 1 && num <= 99999) {
-              bibNumbers.push({
-                bibNumber: match,
-                confidence: line.confidence / 100,
-                bbox: {
-                  x: line.bbox.x0,
-                  y: line.bbox.y0,
-                  width: line.bbox.x1 - line.bbox.x0,
-                  height: line.bbox.y1 - line.bbox.y0,
-                },
-              });
+            if (matches) {
+              for (const match of matches) {
+                // Filter out obvious non-BIB numbers
+                const num = parseInt(match);
+                if (num >= 1 && num <= 99999) {
+                  bibNumbers.push({
+                    bibNumber: match,
+                    confidence: line.confidence / 100,
+                    bbox: {
+                      x: line.bbox.x0,
+                      y: line.bbox.y0,
+                      width: line.bbox.x1 - line.bbox.x0,
+                      height: line.bbox.y1 - line.bbox.y0,
+                    },
+                  });
+                }
+              }
+            }
+
+            // Also check individual words for better accuracy
+            for (const word of line.words || []) {
+              const text = word.text.trim();
+              if (/^\d{1,5}$/.test(text)) {
+                const num = parseInt(text);
+                if (num >= 1 && num <= 99999) {
+                  // Check if not already added
+                  const exists = bibNumbers.some(
+                    (b) =>
+                      b.bibNumber === text &&
+                      Math.abs(b.bbox.x - word.bbox.x0) < 10,
+                  );
+
+                  if (!exists) {
+                    bibNumbers.push({
+                      bibNumber: text,
+                      confidence: word.confidence / 100,
+                      bbox: {
+                        x: word.bbox.x0,
+                        y: word.bbox.y0,
+                        width: word.bbox.x1 - word.bbox.x0,
+                        height: word.bbox.y1 - word.bbox.y0,
+                      },
+                    });
+                  }
+                }
+              }
             }
           }
         }
@@ -106,12 +138,8 @@ export async function extractBibNumbers(
     return filtered;
   } catch (error: any) {
     console.error("❌ OCR error:", error.message);
-
-    // Return empty array instead of throwing
-    // This allows the upload to complete even if OCR fails
     return [];
   } finally {
-    // Always terminate worker to free memory
     if (worker) {
       try {
         await worker.terminate();
@@ -147,11 +175,13 @@ export async function autoTagPhoto(
 }
 
 /**
- * Extract BIB numbers với preprocessing
+ * Extract BIB numbers với preprocessing - FIXED FOR TESSERACT V5
  */
 export async function extractBibNumbersImproved(
   imageUrl: string,
 ): Promise<BibDetection[]> {
+  let worker = null;
+
   try {
     // Download image
     const response = await fetch(imageUrl);
@@ -161,31 +191,41 @@ export async function extractBibNumbersImproved(
     // Preprocess
     const processedBuffer = await preprocessImage(buffer);
 
+    // Create worker
+    worker = await createWorker("eng");
+
     // OCR with better config
-    const result = await Tesseract.recognize(processedBuffer, "eng", {
-      logger: (m) => console.log(m),
-      tessedit_char_whitelist: "0123456789", // Only digits
-      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    await worker.setParameters({
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: 11, // PSM.SPARSE_TEXT
     });
+
+    const result = await worker.recognize(processedBuffer);
 
     const bibNumbers: BibDetection[] = [];
 
-    // Extract numbers
-    for (const word of result.data.words) {
-      const text = word.text.trim();
+    // ✅ FIXED: Traverse structure
+    for (const block of result.data.blocks || []) {
+      for (const paragraph of block.paragraphs || []) {
+        for (const line of paragraph.lines || []) {
+          for (const word of line.words || []) {
+            const text = word.text.trim();
 
-      // BIB numbers are typically 1-5 digits
-      if (/^\d{1,5}$/.test(text) && word.confidence > 70) {
-        bibNumbers.push({
-          bibNumber: text,
-          confidence: word.confidence / 100,
-          bbox: {
-            x: word.bbox.x0,
-            y: word.bbox.y0,
-            width: word.bbox.x1 - word.bbox.x0,
-            height: word.bbox.y1 - word.bbox.y0,
-          },
-        });
+            // BIB numbers are typically 1-5 digits
+            if (/^\d{1,5}$/.test(text) && word.confidence > 70) {
+              bibNumbers.push({
+                bibNumber: text,
+                confidence: word.confidence / 100,
+                bbox: {
+                  x: word.bbox.x0,
+                  y: word.bbox.y0,
+                  width: word.bbox.x1 - word.bbox.x0,
+                  height: word.bbox.y1 - word.bbox.y0,
+                },
+              });
+            }
+          }
+        }
       }
     }
 
@@ -194,6 +234,10 @@ export async function extractBibNumbersImproved(
   } catch (error) {
     console.error("OCR error:", error);
     return [];
+  } finally {
+    if (worker) {
+      await worker.terminate();
+    }
   }
 }
 
@@ -202,31 +246,34 @@ export async function extractBibNumbersImproved(
  */
 export async function detectBibRegions(
   buffer: Buffer,
-): Promise<{ x: number; y: number; width: number; height: number }[]> {
-  // Crop common BIB regions (chest area)
+): Promise<{ left: number; top: number; width: number; height: number }[]> {
   const metadata = await sharp(buffer).metadata();
-  const width = metadata.width!;
-  const height = metadata.height!;
+  const width = metadata.width;
+  const height = metadata.height;
+
+  if (!width || !height) {
+    throw new Error("Invalid image dimensions");
+  }
 
   const regions = [
     // Center chest
     {
-      x: Math.floor(width * 0.3),
-      y: Math.floor(height * 0.2),
+      left: Math.floor(width * 0.3),
+      top: Math.floor(height * 0.2),
       width: Math.floor(width * 0.4),
       height: Math.floor(height * 0.3),
     },
     // Left chest
     {
-      x: Math.floor(width * 0.2),
-      y: Math.floor(height * 0.2),
+      left: Math.floor(width * 0.2),
+      top: Math.floor(height * 0.2),
       width: Math.floor(width * 0.3),
       height: Math.floor(height * 0.3),
     },
     // Right chest
     {
-      x: Math.floor(width * 0.5),
-      y: Math.floor(height * 0.2),
+      left: Math.floor(width * 0.5),
+      top: Math.floor(height * 0.2),
       width: Math.floor(width * 0.3),
       height: Math.floor(height * 0.3),
     },
@@ -236,7 +283,7 @@ export async function detectBibRegions(
 }
 
 /**
- * Multi-region OCR
+ * Multi-region OCR - FIXED FOR TESSERACT V5
  */
 export async function multiRegionOCR(
   imageUrl: string,
@@ -257,8 +304,8 @@ export async function multiRegionOCR(
 
     // Adjust bbox to original image coordinates
     for (const detection of detections) {
-      detection.bbox.x += region.x;
-      detection.bbox.y += region.y;
+      detection.bbox.x += region.left;
+      detection.bbox.y += region.top;
       allDetections.push(detection);
     }
   }

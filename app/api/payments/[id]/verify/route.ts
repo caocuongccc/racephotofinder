@@ -1,12 +1,45 @@
 // ============================================
-// FILE 6: app/api/payments/[id]/verify/route.ts
-// CẬP NHẬT VERIFY PAYMENT (remove getDirectDownloadUrl)
+// FILE: app/api/payments/[id]/verify/route.ts
+// FIX: Use Google Drive direct download URL
 // ============================================
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+
+// GET không thay đổi
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const params = await context.params;
+    const payment = await prisma.payment.findUnique({
+      where: { id: params.id },
+      select: {
+        id: true,
+        amount: true,
+        transactionCode: true,
+        status: true,
+        createdAt: true,
+        verifiedAt: true,
+      },
+    });
+
+    if (!payment) {
+      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(payment);
+  } catch (error) {
+    console.error("Error fetching payment:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
 
 // POST /api/payments/[id]/verify - Admin verify payment
 export async function POST(
@@ -59,8 +92,8 @@ export async function POST(
 
     // If verified, send email with download link
     if (status === "verified" && payment.photo) {
-      // Imgbb URL đã public, dùng trực tiếp
-      const downloadUrl = payment.photo.driveFileId; // Imgbb full-size URL
+      // ✅ USE GOOGLE DRIVE DIRECT DOWNLOAD URL
+      const downloadUrl = `https://drive.google.com/uc?export=download&id=${payment.photo.driveFileId}`;
 
       await sendEmail({
         to: payment.userEmail,
@@ -149,39 +182,6 @@ export async function POST(
     return NextResponse.json({ success: true, payment: updatedPayment });
   } catch (error) {
     console.error("Error verifying payment:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
-
-// GET không thay đổi
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
-  try {
-    const params = await context.params;
-    const payment = await prisma.payment.findUnique({
-      where: { id: params.id },
-      select: {
-        id: true,
-        amount: true,
-        transactionCode: true,
-        status: true,
-        createdAt: true,
-        verifiedAt: true,
-      },
-    });
-
-    if (!payment) {
-      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(payment);
-  } catch (error) {
-    console.error("Error fetching payment:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
