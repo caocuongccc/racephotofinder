@@ -10,6 +10,7 @@ import { generateDriveUrls } from "@/lib/google-drive-helpers";
 import * as faceapi from "face-api.js";
 import canvas from "canvas";
 import path from "path";
+export const runtime = "nodejs";
 
 // Setup face-api.js for Node.js
 const { Canvas, Image, ImageData } = canvas;
@@ -27,9 +28,14 @@ async function loadModels() {
 
   try {
     await Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsPath),
-      faceapi.nets.faceLandmark68Net.loadFromDisk(modelsPath),
-      faceapi.nets.faceRecognitionNet.loadFromDisk(modelsPath),
+      // faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsPath),
+      // faceapi.nets.faceLandmark68Net.loadFromDisk(modelsPath),
+      // faceapi.nets.faceRecognitionNet.loadFromDisk(modelsPath),
+
+      faceapi.nets.ssdMobilenetv1.loadFromUri(modelsPath),
+      faceapi.nets.tinyFaceDetector.loadFromUri(modelsPath),
+      faceapi.nets.faceLandmark68Net.loadFromUri(modelsPath),
+      faceapi.nets.faceRecognitionNet.loadFromUri(modelsPath),
     ]);
 
     modelsLoaded = true;

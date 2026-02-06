@@ -24,9 +24,14 @@ async function loadModels() {
   console.log("📦 Loading models from:", modelsPath);
 
   await Promise.all([
-    faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsPath),
-    faceapi.nets.faceLandmark68Net.loadFromDisk(modelsPath),
-    faceapi.nets.faceRecognitionNet.loadFromDisk(modelsPath),
+    // faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsPath),
+    // faceapi.nets.faceLandmark68Net.loadFromDisk(modelsPath),
+    // faceapi.nets.faceRecognitionNet.loadFromDisk(modelsPath),
+
+    faceapi.nets.ssdMobilenetv1.loadFromUri(modelsPath),
+    faceapi.nets.tinyFaceDetector.loadFromUri(modelsPath),
+    faceapi.nets.faceLandmark68Net.loadFromUri(modelsPath),
+    faceapi.nets.faceRecognitionNet.loadFromUri(modelsPath),
   ]);
 
   modelsLoaded = true;

@@ -12,7 +12,7 @@ import {
   generateFileKey,
   getDownloadUrl,
 } from "@/lib/google-drive-oauth";
-
+import { ensurePublicAccess } from "@/lib/google-drive-helpers";
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -145,7 +145,15 @@ export async function POST(
       originalId: originalUpload.fileId,
       thumbnailId: thumbnailUpload.fileId,
     });
+    // ✅ CRITICAL: Make files publicly accessible
+    console.log("🔓 Making files public...");
 
+    await Promise.all([
+      ensurePublicAccess(session.user.id, originalUpload.fileId),
+      ensurePublicAccess(session.user.id, thumbnailUpload.fileId),
+    ]);
+
+    console.log("✅ Files are now public");
     const updatedPhoto = await prisma.photo.update({
       where: { id: params.id },
       data: {
