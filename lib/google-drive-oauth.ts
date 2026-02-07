@@ -26,7 +26,10 @@ async function getUserFolder(userId: string): Promise<string> {
     q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     fields: "files(id, name)",
   });
-
+  console.log(
+    "🔍 Checking for existing user folder in Google Drive...",
+    existing,
+  );
   let folderId: string;
 
   if (existing.data.files && existing.data.files.length > 0) {

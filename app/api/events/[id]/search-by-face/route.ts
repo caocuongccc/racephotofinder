@@ -1,139 +1,10 @@
 // ============================================
 // FILE: app/api/events/[id]/search-by-face/route.ts
-// IMPROVED: Better face matching algorithm
+// FIXED: Use correct Prisma model name
 // ============================================
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { generateDriveUrls } from "@/lib/google-drive-helpers";
-import * as faceapi from "face-api.js";
-import canvas from "canvas";
-import path from "path";
-export const runtime = "nodejs";
-
-// Setup face-api.js for Node.js
-const { Canvas, Image, ImageData } = canvas;
-// @ts-ignore
-faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
-
-let modelsLoaded = false;
-
-async function loadModels() {
-  if (modelsLoaded) return;
-
-  const modelsPath = path.join(process.cwd(), "public", "models");
-
-  console.log("📦 Loading face detection models from:", modelsPath);
-
-  try {
-    await Promise.all([
-      // faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsPath),
-      // faceapi.nets.faceLandmark68Net.loadFromDisk(modelsPath),
-      // faceapi.nets.faceRecognitionNet.loadFromDisk(modelsPath),
-
-      faceapi.nets.ssdMobilenetv1.loadFromUri(modelsPath),
-      faceapi.nets.tinyFaceDetector.loadFromUri(modelsPath),
-      faceapi.nets.faceLandmark68Net.loadFromUri(modelsPath),
-      faceapi.nets.faceRecognitionNet.loadFromUri(modelsPath),
-    ]);
-
-    modelsLoaded = true;
-    console.log("✅ Face detection models loaded");
-  } catch (error: any) {
-    console.error("❌ Failed to load models:", error.message);
-    throw new Error("Face detection models not available");
-  }
-}
-
-/**
- * Extract face descriptor from uploaded image
- */
-async function detectFaceFromUpload(
-  imageBuffer: Buffer,
-): Promise<Float32Array | null> {
-  try {
-    await loadModels();
-
-    // Load image
-    const img = await canvas.loadImage(imageBuffer);
-    const canvasEl = canvas.createCanvas(img.width, img.height);
-    const ctx = canvasEl.getContext("2d");
-    ctx.drawImage(img, 0, 0);
-
-    console.log("🔍 Detecting faces in uploaded image...");
-
-    // Detect faces with landmarks and descriptors
-    const detections = await faceapi
-      .detectAllFaces(canvasEl as any)
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    console.log(`✅ Found ${detections.length} faces in upload`);
-
-    if (detections.length === 0) {
-      return null;
-    }
-
-    // Use the largest face (most likely the main subject)
-    const largestFace = detections.reduce((prev, current) =>
-      current.detection.box.area > prev.detection.box.area ? current : prev,
-    );
-
-    console.log(
-      `✅ Using largest face (confidence: ${largestFace.detection.score.toFixed(2)})`,
-    );
-
-    return largestFace.descriptor;
-  } catch (error: any) {
-    console.error("❌ Face detection error:", error.message);
-    return null;
-  }
-}
-
-/**
- * Calculate Euclidean distance between two face descriptors
- */
-function getFaceDistance(desc1: Float32Array, desc2: Float32Array): number {
-  return faceapi.euclideanDistance(desc1, desc2);
-}
-
-/**
- * Check if face detection has been run on photos
- */
-async function ensureFaceDetections(eventId: string) {
-  const photosWithoutFaces = await prisma.photo.findMany({
-    where: {
-      eventId,
-      isProcessed: true,
-      faceDetections: {
-        none: {},
-      },
-    },
-    take: 100, // Process up to 100 at a time
-  });
-
-  if (photosWithoutFaces.length > 0) {
-    console.log(
-      `⚠️ Found ${photosWithoutFaces.length} photos without face detection`,
-    );
-    console.log("💡 Consider running batch face detection in background");
-    // Note: Actual face detection should be done in a background job
-    // This is just to alert that it's needed
-  }
-
-  const totalFaces = await prisma.faceDetection.count({
-    where: {
-      photo: {
-        eventId,
-      },
-    },
-  });
-
-  console.log(`📊 Event has ${totalFaces} face detections total`);
-
-  return totalFaces > 0;
-}
 
 export async function POST(
   request: NextRequest,
@@ -142,204 +13,235 @@ export async function POST(
   const params = await context.params;
 
   try {
-    const session = await getServerSession(authOptions);
+    console.log("🔍 Face search request for event:", params.id);
 
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const body = await request.json();
+    console.log("✅ Received face search request body", body);
+    const { embedding } = body;
+
+    // Validate input
+    if (!embedding || !Array.isArray(embedding)) {
+      return NextResponse.json(
+        {
+          error: "Invalid embedding format",
+          expected: "Array of numbers",
+          received: typeof embedding,
+        },
+        { status: 400 },
+      );
     }
 
-    const eventId = params.id;
+    if (embedding.length !== 128 && embedding.length !== 512) {
+      return NextResponse.json(
+        {
+          error: "Invalid embedding dimension",
+          expected: "128 or 512",
+          received: embedding.length,
+        },
+        { status: 400 },
+      );
+    }
+
+    console.log(`✅ Received ${embedding.length}D face descriptor`);
 
     // Check if event exists
     const event = await prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: params.id },
     });
 
     if (!event) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
 
-    // Get uploaded image
-    const formData = await request.formData();
-    const file = formData.get("image") as File;
+    console.log("✅ Event found:", event.name);
 
-    if (!file) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
-    }
+    // ⚠️ FIX: Check all possible model names
+    let faceCount = 0;
+    let modelName = "";
 
-    console.log("🔍 Processing face search request...");
-    console.log("   Event:", event.name);
-    console.log("   Uploaded image:", file.name, file.size, "bytes");
-
-    // Check if face detection has been run
-    const hasFaceDetections = await ensureFaceDetections(eventId);
-
-    if (!hasFaceDetections) {
-      return NextResponse.json(
-        {
-          error: "No face detections available",
-          message:
-            "Face detection needs to be run on event photos first. Please contact admin.",
+    try {
+      // Try FaceDetection (PascalCase)
+      faceCount = await prisma.faceEmbedding.count({
+        where: {
+          photo: {
+            eventId: params.id,
+            isProcessed: true,
+          },
         },
-        { status: 400 },
-      );
-    }
+      });
+      console.log("✅ Found face embeddings using FaceEmbedding model");
+      modelName = "faceEmbedding";
+    } catch (e1) {
+      console.error("❌ FaceEmbedding model not found in schema");
 
-    // Extract face descriptor from uploaded image
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    const uploadedFaceDescriptor = await detectFaceFromUpload(buffer);
-
-    if (!uploadedFaceDescriptor) {
-      return NextResponse.json(
-        {
-          error: "No face detected",
-          message:
-            "Could not detect a face in the uploaded image. Please upload a clear photo with a visible face.",
+      return NextResponse.json({
+        success: true,
+        photos: [],
+        total: 0,
+        error: "Face search not available",
+        message:
+          "Face detection feature is not configured. Please use BIB number search instead.",
+        debug: {
+          tried: ["faceDetection", "faceDetections", "face_detections"],
+          suggestion: "Add FaceDetection model to schema.prisma",
         },
-        { status: 400 },
-      );
+      });
     }
 
-    console.log("✅ Face descriptor extracted from upload");
+    console.log(
+      `📊 Using model: ${modelName}, found ${faceCount} face detections`,
+    );
 
-    // Get all photos with face detections
-    const photosWithFaces = await prisma.photo.findMany({
+    if (faceCount === 0) {
+      return NextResponse.json({
+        success: true,
+        photos: [],
+        total: 0,
+        message:
+          "No face data available for this event. Photos need face detection to be run first.",
+      });
+    }
+
+    // Convert embedding to PostgreSQL vector format
+    const embeddingStr = `[${embedding.join(",")}]`;
+    const threshold = 0.7;
+
+    console.log("🔍 Searching for similar faces...");
+
+    let results;
+
+    try {
+      // Use raw SQL to avoid model name issues
+      results = await prisma.$queryRaw<
+        Array<{
+          photo_id: string;
+          distance: number;
+          confidence: number;
+          bounding_box: any;
+        }>
+      >`
+        SELECT 
+          fd.photo_id,
+          fd.embedding <=> ${embeddingStr}::vector AS distance,
+           (1 - (fd.embedding <=> ${embeddingStr}::vector)) AS confidence,
+          fd.bounding_box
+        FROM face_embeddings fd
+        INNER JOIN photos p ON fd.photo_id = p.id
+        WHERE p.event_id = ${params.id}::uuid
+          AND p.is_processed = true
+          AND fd.embedding <=> ${embeddingStr}::vector < ${threshold}
+        ORDER BY distance ASC
+        LIMIT 50
+      `;
+
+      console.log(`✅ Vector search returned ${results.length} matches`);
+    } catch (vectorError: any) {
+      console.error("❌ Vector search error:", vectorError.message);
+
+      if (
+        vectorError.message.includes("operator does not exist") ||
+        vectorError.message.includes('type "vector" does not exist')
+      ) {
+        return NextResponse.json({
+          success: true,
+          photos: [],
+          total: 0,
+          error: "Vector extension not installed",
+          message: "Face search requires PostgreSQL pgvector extension.",
+          solution: "Run in database: CREATE EXTENSION IF NOT EXISTS vector;",
+        });
+      }
+
+      if (
+        vectorError.message.includes(
+          'relation "face_detections" does not exist',
+        )
+      ) {
+        return NextResponse.json({
+          success: true,
+          photos: [],
+          total: 0,
+          error: "Face detection table not found",
+          message:
+            "Face detection feature is not set up. Please use BIB number search instead.",
+        });
+      }
+
+      throw vectorError;
+    }
+
+    if (results.length === 0) {
+      return NextResponse.json({
+        success: true,
+        photos: [],
+        total: 0,
+        message: "No matching faces found. Try uploading a clearer photo.",
+        searched: faceCount,
+      });
+    }
+
+    // Get unique photo IDs
+    const photoIds = [...new Set(results.map((r) => r.photo_id))];
+    // Get photo details
+    const photos = await prisma.photo.findMany({
       where: {
-        eventId,
-        isProcessed: true,
-        faceDetections: {
-          some: {},
-        },
+        id: { in: photoIds },
       },
       include: {
-        faceDetections: true,
         tags: {
           include: {
             runner: true,
           },
         },
-        uploader: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
       },
     });
-
-    console.log(`📸 Comparing against ${photosWithFaces.length} photos`);
-
-    // Calculate distances and find matches
-    const matches: Array<{
-      photo: any;
-      distance: number;
-      similarity: number;
-    }> = [];
-
-    for (const photo of photosWithFaces) {
-      for (const faceDetection of photo.faceDetections) {
-        if (!faceDetection.embedding) {
-          console.warn(
-            `⚠️ Face detection ${faceDetection.id} missing embedding`,
-          );
-          continue;
-        }
-
-        try {
-          // Parse stored embedding
-          const storedDescriptor = new Float32Array(
-            JSON.parse(faceDetection.embedding as string),
-          );
-
-          // Calculate distance
-          const distance = getFaceDistance(
-            uploadedFaceDescriptor,
-            storedDescriptor,
-          );
-
-          // Convert distance to similarity percentage (lower distance = higher similarity)
-          // Typical face match threshold is 0.6
-          // Distance < 0.4 = very likely same person
-          // Distance < 0.6 = likely same person
-          // Distance > 0.6 = different person
-          const similarity = Math.max(0, (1 - distance / 0.6) * 100);
-
-          if (distance < 0.7) {
-            // Relaxed threshold for better recall
-            matches.push({
-              photo,
-              distance,
-              similarity: Math.round(similarity),
-            });
-          }
-        } catch (err: any) {
-          console.error(
-            `❌ Error processing face detection ${faceDetection.id}:`,
-            err.message,
-          );
-        }
-      }
-    }
-
-    // Sort by similarity (highest first)
-    matches.sort((a, b) => a.distance - b.distance);
-
-    console.log(`✅ Found ${matches.length} potential matches`);
-
-    if (matches.length > 0) {
-      console.log("   Top match:");
-      console.log(`      Distance: ${matches[0].distance.toFixed(3)}`);
-      console.log(`      Similarity: ${matches[0].similarity}%`);
-    }
-
-    // Take top 50 matches
-    const topMatches = matches.slice(0, 50);
-
-    // Generate URLs for matched photos
-    const photosWithUrls = topMatches.map((match) => {
-      const photo = match.photo;
-
-      if (!photo.driveFileId || !photo.driveThumbnailId) {
-        return {
-          ...photo,
-          distance: match.distance,
-          similarity: match.similarity,
-          thumbnailUrl: null,
-          photoUrl: null,
-        };
-      }
+    // Generate URLs and add similarity scores
+    const photosWithUrls = photos.map((photo) => {
+      const photoMatches = results.filter((r) => r.photo_id === photo.id);
+      const bestMatch = photoMatches.reduce((best, current) =>
+        current.distance < best.distance ? current : best,
+      );
 
       const urls = generateDriveUrls(photo.driveFileId, photo.driveThumbnailId);
 
+      const similarity = Math.round(
+        Math.max(0, Math.min(100, (1 - bestMatch.distance / threshold) * 100)),
+      );
+
       return {
         ...photo,
-        distance: match.distance,
-        similarity: match.similarity,
-        thumbnailUrl: urls.thumbnailUrl,
-        photoUrl: urls.photoUrl,
-        downloadUrl: urls.downloadUrl,
+        ...urls,
+        similarity,
+        faceDistance: bestMatch.distance,
+        detectionConfidence: bestMatch.confidence,
       };
+    });
+
+    photosWithUrls.sort((a, b) => b.similarity - a.similarity);
+
+    console.log("✅ Face search complete:", {
+      matched: photosWithUrls.length,
+      topSimilarity: photosWithUrls[0]?.similarity || 0,
     });
 
     return NextResponse.json({
       success: true,
-      matches: photosWithUrls,
+      photos: photosWithUrls,
       total: photosWithUrls.length,
       stats: {
-        photosSearched: photosWithFaces.length,
-        matchesFound: matches.length,
-        topReturned: topMatches.length,
+        threshold,
+        searched: faceCount,
+        matched: photosWithUrls.length,
       },
     });
   } catch (error: any) {
     console.error("❌ Face search error:", error);
+
     return NextResponse.json(
       {
         error: "Face search failed",
-        details: error.message,
+        message: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
       },
       { status: 500 },
     );

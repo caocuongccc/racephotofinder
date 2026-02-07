@@ -16,10 +16,13 @@ import {
   Image as ImageIcon,
   X,
   Upload,
+  Eye,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { formatDate } from "@/lib/utils";
 import { SocialShare } from "@/components/social-share";
+import { PhotoModal } from "@/components/PhotoModal";
+import { PhotoCard } from "@/components/photo-card";
 
 interface Event {
   id: string;
@@ -87,7 +90,7 @@ export default function EventDetailPage() {
     eventId: string,
     query?: string,
     type?: "bib" | "name" | "face",
-    currentPage = 1
+    currentPage = 1,
   ) => {
     try {
       setSearching(true);
@@ -98,7 +101,7 @@ export default function EventDetailPage() {
         "query:",
         query,
         "type:",
-        type
+        type,
       );
       if (query && type !== "face") {
         if (type === "bib") {
@@ -227,7 +230,11 @@ export default function EventDetailPage() {
 
   const handleDownload = async (photo: Photo) => {
     try {
-      const response = await fetch(photo.photoUrl);
+      const response = await fetch(`/api/photos/${photo.id}/proxy?type=photo`);
+
+      if (!response.ok) {
+        throw new Error("Download failed");
+      }
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -265,6 +272,10 @@ export default function EventDetailPage() {
         </div>
       </div>
     );
+  }
+
+  function openPhotoModal(photo: Photo): void {
+    throw new Error("Function not implemented.");
   }
 
   return (
@@ -433,39 +444,11 @@ export default function EventDetailPage() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {photos.map((photo) => (
-                <div
+                <PhotoCard
                   key={photo.id}
-                  className="group relative bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-lg transition-shadow cursor-pointer"
-                  onClick={() => setSelectedPhoto(photo)}
-                >
-                  <img
-                    src={photo.thumbnailUrl}
-                    alt="Race photo"
-                    className="w-full h-64 object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-opacity flex items-center justify-center">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownload(photo);
-                      }}
-                    >
-                      <Download className="h-4 w-4 mr-1" />
-                      Tải xuống
-                    </Button>
-                  </div>
-                  {photo.tags.length > 0 && (
-                    <div className="p-2 bg-white">
-                      <p className="text-xs text-gray-600 truncate">
-                        BIB:{" "}
-                        {photo.tags.map((t) => t.runner.bibNumber).join(", ")}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                  photo={photo}
+                  onView={(p) => setSelectedPhoto(p)}
+                />
               ))}
             </div>
 
@@ -481,7 +464,7 @@ export default function EventDetailPage() {
                       event.id,
                       searchQuery || undefined,
                       searchType,
-                      page - 1
+                      page - 1,
                     )
                   }
                 >
@@ -499,7 +482,7 @@ export default function EventDetailPage() {
                       event.id,
                       searchQuery || undefined,
                       searchType,
-                      page + 1
+                      page + 1,
                     )
                   }
                 >
@@ -510,7 +493,10 @@ export default function EventDetailPage() {
           </>
         )}
       </div>
-
+      <PhotoModal
+        photo={selectedPhoto}
+        onClose={() => setSelectedPhoto(null)}
+      />
       {/* Photo Detail Modal */}
       {selectedPhoto && (
         <Modal

@@ -99,7 +99,11 @@ export async function GET(
         };
       }
 
-      const urls = generateDriveUrls(photo.driveFileId, photo.driveThumbnailId);
+      const urls = generateDriveUrls(
+        photo.driveFileId,
+        photo.driveThumbnailId,
+        photo.id, // ✅ Pass photo ID for proxy
+      );
 
       console.log(`✅ Generated URLs for photo ${photo.id}:`, {
         thumbnail: urls.thumbnailUrl.substring(0, 50) + "...",
@@ -108,10 +112,7 @@ export async function GET(
 
       return {
         ...photo,
-        thumbnailUrl: urls.thumbnailUrl,
-        photoUrl: urls.photoUrl,
-        downloadUrl: urls.downloadUrl,
-        webViewLink: urls.webViewLink,
+        ...urls,
       };
     });
 

@@ -34,28 +34,39 @@ export interface DriveUrls {
 export function generateDriveUrls(
   fileId: string,
   thumbnailId: string | null = null,
+  photoId?: string, // NEW: photo ID for proxy
 ): DriveUrls {
-  // ✅ THUMBNAIL: Always works if file is public
-  // Format: https://drive.google.com/thumbnail?id={fileId}&sz=w{size}
-  const thumbnailUrl = thumbnailId
-    ? `https://drive.google.com/thumbnail?id=${thumbnailId}&sz=w800`
-    : `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
-
-  // ✅ PHOTO URL: Direct link for viewing
-  // This uses Google's content delivery network
-  const photoUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-
-  // ✅ DOWNLOAD URL: Force download
-  const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-
-  // ✅ WEB VIEW: Open in Google Drive UI
-  const webViewLink = `https://drive.google.com/file/d/${fileId}/view`;
+  if (!fileId) {
+    return {
+      thumbnailUrl: "/placeholder.jpg",
+      photoUrl: "/placeholder.jpg",
+      downloadUrl: "#",
+      webViewLink: "#",
+    };
+  }
+  // ✅ OPTION 1: Use proxy (recommended - no CORS issues)
+  if (photoId) {
+    return {
+      thumbnailUrl: `/api/photos/${photoId}/proxy?type=thumbnail`,
+      photoUrl: `/api/photos/${photoId}/proxy?type=photo`,
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
+      webViewLink: `https://drive.google.com/file/d/${fileId}/view`,
+    };
+  }
+  // ✅ OPTION 2: Direct URLs (requires public files)
+  const thumbnailDriverId = thumbnailId || fileId;
 
   return {
-    thumbnailUrl,
-    photoUrl,
-    downloadUrl,
-    webViewLink,
+    // Thumbnail with size parameter (better for CORS)
+    thumbnailUrl: `https://lh3.googleusercontent.com/d/${thumbnailDriverId}=w800`,
+    // Photo view
+    photoUrl: `https://drive.google.com/uc?export=view&id=${fileId}`,
+
+    // Download
+    downloadUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
+
+    // Web view
+    webViewLink: `https://drive.google.com/file/d/${fileId}/view`,
   };
 }
 
